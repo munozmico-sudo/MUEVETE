@@ -24,7 +24,7 @@
   input.code { font-size:44px; width:220px; text-align:center; letter-spacing:12px; padding:8px; border-radius:14px; border:0; font-weight:800; }
   .row { display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; }
   select { font-size:18px; padding:8px; border-radius:10px; }
-  #game { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+  #game { position:fixed; inset:0; width:100vw; height:100vh; display:block; z-index:1; }
   #video { position:fixed; width:1px; height:1px; opacity:0; pointer-events:none; }
   #loading { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(10,10,30,.85);
     font-size:24px; font-weight:700; z-index:50; padding:20px; text-align:center; }
@@ -103,7 +103,8 @@
 <canvas id="game" class="hidden"></canvas>
 <button id="exitBtn" class="hidden" title="Salir" onclick="location.href=location.pathname">✕</button>
 <video id="video" playsinline muted autoplay></video>
-<video id="remoteVideo" playsinline muted autoplay style="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none"></video>
+<video id="remoteVideo" playsinline muted autoplay
+  style="position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;transform:scaleX(-1);z-index:0;visibility:hidden;pointer-events:none;background:transparent"></video>
 <button id="videoBtn" class="hidden" title="Mostrar u ocultar la imagen de la cámara"
   style="position:fixed;top:10px;right:62px;z-index:40;background:rgba(0,0,0,.4);color:#fff;border:0;border-radius:12px;font-size:22px;width:44px;height:44px;cursor:pointer">🎥</button>
 <div id="loading"></div>
@@ -141,6 +142,11 @@ let landmarker = null, stream = null, facing = 'user', lastVideoTime = -1;
 const video = $('#video');
 const remoteVideo = $('#remoteVideo');   // en la TV: imagen que llega desde el móvil-cámara
 let showVideo = true, mediaCall = null;
+// Plan B para TVs que no muestran el vídeo WebRTC: el móvil envía fotos JPEG seguidas
+let jpgMode = false, lastJpg = 0;
+const jpgImg = new Image();
+const snapCv = document.createElement('canvas'), snapCtx = snapCv.getContext('2d');
+const tvVideoOk = () => MODE === 'tv' && !jpgMode && remoteVideo.videoWidth > 0 && remoteVideo.readyState >= 2;
 
 async function initPose(){
   loading('Cargando el detector de movimiento…');
@@ -654,12 +660,12 @@ function update(dt){
 function drawBackground(){
   const g = ctx.createLinearGradient(0,0,0,cv.height); g.addColorStop(0,'#1a1440'); g.addColorStop(1,'#0b2a3a');
   ctx.fillStyle = g; ctx.fillRect(0,0,cv.width,cv.height);
-  const src = MODE === 'local' ? video : remoteVideo;
-  if (showVideo && src.readyState >= 2 && src.videoWidth){
-    // Imagen de la cámara en espejo, como si fuera un espejo, con un velo ligero para que se lea el juego
-    ctx.save(); ctx.translate(R.x+R.w, R.y); ctx.scale(-1,1); ctx.drawImage(src, 0, 0, R.w, R.h); ctx.restore();
-    ctx.fillStyle = 'rgba(10,10,40,.25)'; ctx.fillRect(R.x, R.y, R.w, R.h);
-  }
+  const veil = () => { ctx.fillStyle = 'rgba(10,10,40,.25)'; ctx.fillRect(R.x, R.y, R.w, R.h); };
+  const mirrorDraw = src => { ctx.save(); ctx.translate(R.x+R.w, R.y); ctx.scale(-1,1); ctx.drawImage(src, 0, 0, R.w, R.h); ctx.restore(); veil(); };
+  if (!showVideo) {}
+  else if (MODE === 'local' && video.readyState >= 2 && video.videoWidth) mirrorDraw(video);
+  else if (tvVideoOk()) { ctx.clearRect(0,0,cv.width,cv.height); veil(); }        // el vídeo real se ve detrás del lienzo
+  else if (MODE === 'tv' && jpgImg.complete && jpgImg.naturalWidth) mirrorDraw(jpgImg);
   ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.lineWidth = 1;
   for (let k=1;k<10;k++){ const y = R.y + R.h*k/10; ctx.beginPath(); ctx.moveTo(R.x,y); ctx.lineTo(R.x+R.w,y); ctx.stroke(); }
   if (game.n === 2 && ['intro','play'].includes(game.state)){
@@ -745,7 +751,10 @@ function frame(now){
   if (MODE === 'local'){ const d = detect(); if (d) tracker.update(d.poses, d.aspect); }
   if (MODE === 'local' || MODE === 'tv'){
     R = viewRect(); update(dt); draw();
-    if (MODE === 'tv') $('#tvWait').classList.toggle('hidden', camConnected);
+    if (MODE === 'tv'){
+      $('#tvWait').classList.toggle('hidden', camConnected);
+      remoteVideo.style.visibility = (showVideo && tvVideoOk()) ? 'visible' : 'hidden';
+    }
   }
   if (MODE === 'cam') camFrame(now);
   requestAnimationFrame(frame);
@@ -796,7 +805,13 @@ function startTV(){
     peer.on('connection', c => {
       if (conn) try { conn.close(); } catch(e){}
       conn = c;
-      c.on('data', d => { if (d && d.p){ tracker.update(d.p, d.a); camConnected = true; } });
+      c.on('data', d => {
+        if (d && d.p){ tracker.update(d.p, d.a); camConnected = true; }
+        if (d && d.j) jpgImg.src = d.j;
+      });
+      // Si a los 5 s no llega imagen de vídeo, se pide al móvil que mande fotos
+      jpgMode = false;
+      setTimeout(() => { if (conn === c && !(remoteVideo.videoWidth > 0)){ jpgMode = true; try { c.send({ need:'jpg' }); } catch(e){} } }, 5000);
       c.on('close', () => { if (conn === c){ camConnected = false; conn = null; } });
     });
   };
@@ -831,7 +846,8 @@ async function startCam(code){
     const connect = () => {
       camStatus('Conectando con la TV ' + code + '…');
       conn = peer.connect(PEER_PREFIX + code, { serialization:'json' });
-      conn.on('open', () => { camStatus('✔ Conectado a la TV ' + code + ' · enviando imagen', 'ok'); sendVideo(); });
+      conn.on('open', () => { jpgMode = false; camStatus('✔ Conectado a la TV ' + code + ' · enviando imagen', 'ok'); sendVideo(); });
+      conn.on('data', d => { if (d && d.need === 'jpg'){ jpgMode = true; camStatus('✔ Conectado a la TV ' + code + ' · imagen en modo fotos', 'ok'); } });
       conn.on('close', () => { camStatus('Conexión perdida. Reintentando…', 'bad'); setTimeout(connect, 2000); });
     };
     peer.on('open', connect);
@@ -847,6 +863,14 @@ function camFrame(now){
   if (d){
     lastPoses = d.poses; tracker.aspect = d.aspect;
     if (conn && conn.open && now - lastSend > 38){ lastSend = now; try { conn.send({ p:d.poses, a:+d.aspect.toFixed(3) }); } catch(e){} }
+  }
+  // Plan B: fotos pequeñas (~9 por segundo) cuando la TV no muestra el vídeo
+  if (jpgMode && conn && conn.open && video.readyState >= 2 && now - lastJpg > 110){
+    lastJpg = now;
+    const w = 400, h = Math.round(w / tracker.aspect);
+    if (snapCv.width !== w || snapCv.height !== h){ snapCv.width = w; snapCv.height = h; }
+    snapCtx.drawImage(video, 0, 0, w, h);
+    try { conn.send({ j: snapCv.toDataURL('image/jpeg', 0.6) }); } catch(e){}
   }
   // Vista previa
   const W = camCv.width, H = Math.round(W / tracker.aspect); if (camCv.height !== H) camCv.height = H;
