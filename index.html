@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1a1440">
+<title>¡Muévete! · Fiesta de movimiento</title>
+<style>
+  :root { --p1:#3fd0ff; --p2:#ff5fa2; --bg:#1a1440; --bg2:#0b2a3a; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:linear-gradient(#1a1440,#0b2a3a); color:#fff;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  .hidden { display:none !important; }
+  .screen { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; padding:20px; text-align:center; overflow:auto; }
+  h1 { font-size:clamp(40px,9vw,90px); margin:0; background:linear-gradient(90deg,var(--p1),#ffe14d,var(--p2));
+    -webkit-background-clip:text; background-clip:text; color:transparent; }
+  p { margin:0; opacity:.85; max-width:640px; line-height:1.4; }
+  button.big { width:min(520px,92vw); padding:16px 18px; border:0; border-radius:18px; font-size:20px; font-weight:800;
+    color:#10122a; background:#fff; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; }
+  button.big small { font-weight:500; font-size:14px; opacity:.7; }
+  button.big:focus, button.big:hover { outline:5px solid #ffe14d; }
+  button.b1 { background:var(--p1); } button.b2 { background:#ffe14d; } button.b3 { background:var(--p2); }
+  input.code { font-size:44px; width:220px; text-align:center; letter-spacing:12px; padding:8px; border-radius:14px; border:0; font-weight:800; }
+  .row { display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; }
+  select { font-size:18px; padding:8px; border-radius:10px; }
+  #game { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+  #video { position:fixed; width:1px; height:1px; opacity:0; pointer-events:none; }
+  #loading { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(10,10,30,.85);
+    font-size:24px; font-weight:700; z-index:50; padding:20px; text-align:center; }
+  #exitBtn { position:fixed; top:10px; right:10px; z-index:40; background:rgba(0,0,0,.4); color:#fff; border:0; border-radius:12px;
+    font-size:22px; width:44px; height:44px; cursor:pointer; }
+  #tvWait { position:fixed; inset:0; z-index:30; display:flex; align-items:center; justify-content:center; gap:40px;
+    background:rgba(10,10,30,.88); padding:30px; flex-wrap:wrap; text-align:left; }
+  #tvWait .codeBig { font-size:clamp(60px,12vw,150px); font-weight:900; letter-spacing:14px; color:#ffe14d; }
+  #tvWait ol { font-size:clamp(16px,2.2vw,26px); line-height:1.6; margin:10px 0 0; padding-left:28px; }
+  #qr svg { background:#fff; border-radius:14px; width:clamp(160px,22vw,280px); height:auto; }
+  #camCanvas { width:min(96vw,720px); border-radius:16px; background:#000; }
+  .status { font-size:20px; font-weight:700; }
+  .ok { color:#6dff9c; } .bad { color:#ff7a7a; }
+</style>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
+</head>
+<body>
+
+<!-- Pantalla de inicio -->
+<div id="home" class="screen">
+  <h1>¡Muévete!</h1>
+  <p>Juego de fiesta para 1 o 2 jugadores que se controla con el cuerpo: burbujas, saltos y baile.</p>
+  <button class="big b1" data-mode="local">📱 Jugar en este dispositivo<small>Ideal para duplicar la pantalla en la TV</small></button>
+  <button class="big b2" data-mode="tv">📺 Esta es la pantalla de la TV<small>Ábrelo en el navegador de la Smart TV</small></button>
+  <button class="big b3" data-mode="cam">🎥 Usar este móvil como cámara<small>Se conecta a la TV con un código</small></button>
+  <p style="font-size:13px;opacity:.6">Consejo: móvil apoyado en horizontal, a la altura de la cintura y a 2–3 m de los jugadores.</p>
+</div>
+
+<!-- Configuración del móvil-cámara -->
+<div id="camSetup" class="screen hidden">
+  <h2 style="margin:0">🎥 Móvil como cámara</h2>
+  <p>Escribe el código que aparece en la TV.</p>
+  <input id="codeInput" class="code" type="tel" inputmode="numeric" maxlength="4" placeholder="0000">
+  <div class="row">
+    <label>Cámara:</label>
+    <select id="facingSel"><option value="user">Delantera (selfie)</option><option value="environment">Trasera (mejor calidad)</option></select>
+  </div>
+  <button id="connectBtn" class="big b3">Conectar</button>
+  <button class="big" onclick="location.href=location.pathname">← Volver</button>
+</div>
+
+<!-- Móvil-cámara funcionando -->
+<div id="camRun" class="screen hidden">
+  <div id="camStatus" class="status">Conectando…</div>
+  <canvas id="camCanvas" width="640" height="360"></canvas>
+  <p>Deja el móvil apoyado en horizontal, que se os vea de cuerpo entero. Jugador 1 a la izquierda y jugador 2 a la derecha (mirando a la TV).</p>
+  <div class="row">
+    <button class="big" style="width:auto" id="flipBtn">🔄 Cambiar cámara</button>
+    <button class="big" style="width:auto" onclick="location.href=location.pathname">✕ Salir</button>
+  </div>
+</div>
+
+<!-- TV: inicio (necesario para activar el sonido) -->
+<div id="tvStart" class="screen hidden">
+  <h1>¡Muévete!</h1>
+  <p>Pulsa <b>OK</b> en el mando de la TV para empezar.</p>
+  <button id="tvGo" class="big b2">▶ Empezar</button>
+</div>
+
+<!-- TV: esperando a la cámara -->
+<div id="tvWait" class="hidden">
+  <div>
+    <div style="font-size:clamp(18px,2.4vw,30px);opacity:.8">Código para la cámara</div>
+    <div class="codeBig" id="tvCode">····</div>
+    <ol>
+      <li>En el móvil, abre esta misma página.</li>
+      <li>Elige <b>«Usar este móvil como cámara»</b>.</li>
+      <li>Escribe el código… o escanea el QR.</li>
+    </ol>
+    <div id="tvNet" style="opacity:.6;margin-top:10px"></div>
+  </div>
+  <div id="qr"></div>
+</div>
+
+<canvas id="game" class="hidden"></canvas>
+<button id="exitBtn" class="hidden" title="Salir" onclick="location.href=location.pathname">✕</button>
+<video id="video" playsinline muted autoplay></video>
+<div id="loading"></div>
+
+<script type="module">
+// =====================================================================
+//  ¡Muévete!  ·  Juego de movimiento con cámara (MediaPipe Pose)
+//  Modos: local (todo en un dispositivo) · tv (pantalla) · cam (móvil-cámara)
+// =====================================================================
+const VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const MODEL_URL  = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+const PEER_PREFIX = 'muevete-fiesta-tv-';
+const PCOL  = ['#3fd0ff', '#ff5fa2'];
+const PNAME = ['Jugador 1', 'Jugador 2'];
+const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const rand  = (a,b) => a + Math.random()*(b-a);
+const lerp  = (a,b,t) => a + (b-a)*t;
+let MODE = null;
+
+function show(id){ document.querySelectorAll('.screen').forEach(e=>e.classList.add('hidden')); if(id) $('#'+id).classList.remove('hidden'); }
+function loading(msg){ const el=$('#loading'); el.textContent=msg||''; el.style.display = msg ? 'flex' : 'none'; }
+async function keepAwake(){ try { if('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch(e){} }
+async function goFullscreen(){
+  try { await document.documentElement.requestFullscreen(); } catch(e){}
+  try { await screen.orientation.lock('landscape'); } catch(e){}
+}
+
+// ---------------------------------------------------------------------
+//  Detección de posturas (solo en el dispositivo con cámara)
+// ---------------------------------------------------------------------
+let landmarker = null, stream = null, facing = 'user', lastVideoTime = -1;
+const video = $('#video');
+
+async function initPose(){
+  loading('Cargando el detector de movimiento…');
+  const { PoseLandmarker, FilesetResolver } = await import(VISION_URL + '/vision_bundle.mjs');
+  const files = await FilesetResolver.forVisionTasks(VISION_URL + '/wasm');
+  const opts = delegate => ({ baseOptions:{ modelAssetPath:MODEL_URL, delegate }, runningMode:'VIDEO', numPoses:2,
+    minPoseDetectionConfidence:0.5, minPosePresenceConfidence:0.5, minTrackingConfidence:0.5 });
+  try { landmarker = await PoseLandmarker.createFromOptions(files, opts('GPU')); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(files, opts('CPU')); }
+  loading('');
+}
+async function startCamera(){
+  if (stream) stream.getTracks().forEach(t=>t.stop());
+  loading('Abriendo la cámara…');
+  stream = await navigator.mediaDevices.getUserMedia({ audio:false,
+    video:{ facingMode:facing, width:{ideal:1280}, height:{ideal:720} } });
+  video.srcObject = stream; await video.play(); lastVideoTime = -1;
+  loading('');
+}
+// Devuelve {poses:[[x,y,vis]*33 aplanado], aspect} con la imagen en espejo, o null si no hay fotograma nuevo
+function detect(){
+  if (!landmarker || video.readyState < 2 || video.currentTime === lastVideoTime) return null;
+  lastVideoTime = video.currentTime;
+  const res = landmarker.detectForVideo(video, performance.now());
+  const poses = (res.landmarks || []).slice(0,2).map(lm => {
+    const a = new Array(99);
+    lm.forEach((p,i) => { a[i*3] = +(1-p.x).toFixed(4); a[i*3+1] = +p.y.toFixed(4); a[i*3+2] = +(p.visibility ?? 1).toFixed(2); });
+    return a;
+  });
+  return { poses, aspect: (video.videoWidth || 16) / (video.videoHeight || 9) };
+}
+
+// ---------------------------------------------------------------------
+//  Seguimiento de jugadores: hueco 0 = izquierda, hueco 1 = derecha
+// ---------------------------------------------------------------------
+const tracker = {
+  slots:[null,null], seen:[0,0], aspect:16/9, last:0,
+  update(poses, aspect){
+    const now = performance.now();
+    if (aspect) this.aspect = aspect;
+    this.last = now;
+    const ps = (poses||[]).slice(0,2).map(a => ({ a, cx:(a[69]+a[72])/2 })).sort((p,q) => p.cx - q.cx);
+    const next = [null,null];
+    if (ps.length === 2){ next[0] = ps[0].a; next[1] = ps[1].a; }
+    else if (ps.length === 1){ next[ps[0].cx < 0.5 ? 0 : 1] = ps[0].a; }
+    for (let i=0;i<2;i++){
+      const prev = this.slots[i], cur = next[i];
+      if (!cur){ if (now - this.seen[i] > 350) this.slots[i] = null; continue; }
+      this.seen[i] = now;
+      if (!prev){ this.slots[i] = cur.slice(); continue; }
+      for (let k=0;k<99;k++) prev[k] = (k%3===2) ? cur[k] : prev[k]*0.4 + cur[k]*0.6;
+    }
+  },
+  get(i){ return (performance.now() - this.last > 700) ? null : this.slots[i]; }
+};
+
+// ---------------------------------------------------------------------
+//  Lienzo y utilidades de dibujo
+// ---------------------------------------------------------------------
+const cv = $('#game'), ctx = cv.getContext('2d');
+let R = {x:0,y:0,w:1,h:1};   // rectángulo donde se proyecta la imagen de la cámara
+function resize(){ const d = Math.min(window.devicePixelRatio||1, 2); cv.width = Math.round(innerWidth*d); cv.height = Math.round(innerHeight*d); }
+addEventListener('resize', resize);
+function viewRect(){
+  const W=cv.width, H=cv.height, ar=tracker.aspect; let w=W, h=W/ar;
+  if (h > H){ h = H; w = H*ar; }
+  return { x:(W-w)/2, y:(H-h)/2, w, h };
+}
+const P = (lm,i) => ({ x:R.x + lm[i*3]*R.w, y:R.y + lm[i*3+1]*R.h, v:lm[i*3+2] });
+function rrect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function text(s,x,y,size,color='#fff',align='center',weight=800){
+  ctx.font = `${weight} ${Math.round(size)}px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`;
+  ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round'; ctx.lineWidth = size*0.16; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.strokeText(s,x,y);
+  ctx.fillStyle = color; ctx.fillText(s,x,y);
+}
+function circle(x,y,r,fill,stroke,lw){ ctx.beginPath(); ctx.arc(x,y,Math.max(0.1,r),0,Math.PI*2); if(fill){ctx.fillStyle=fill;ctx.fill();} if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw||2;ctx.stroke();} }
+
+// Manos de un jugador (punta del índice o, si no se ve, muñeca)
+function hands(lm){
+  const out = [];
+  for (const [a,b] of [[19,15],[20,16]]){
+    const i = lm[a*3+2] > 0.4 ? a : (lm[b*3+2] > 0.4 ? b : -1);
+    if (i >= 0) out.push(P(lm,i));
+  }
+  return out;
+}
+function metrics(lm){
+  const sh = (lm[34]+lm[37])/2, hip = (lm[70]+lm[73])/2;
+  const ank = (lm[27*3+2] > 0.4 && lm[28*3+2] > 0.4) ? (lm[82]+lm[85])/2 : hip + (hip-sh)*1.7;
+  return { sh, hip, ank, nose:lm[1], cx:(lm[69]+lm[72])/2, torso:Math.max(0.04, hip-sh) };
+}
+const fullBody = lm => lm && lm[2] > 0.5 && lm[27*3+2] > 0.4 && lm[28*3+2] > 0.4;
+
+// Ángulos de los brazos según el lado de la pantalla: 0 = en cruz, 90 = arriba, -90 = abajo
+function armAngles(lm){
+  const sh = [11,12].sort((a,b) => lm[a*3] - lm[b*3]);   // primero el hombro de la izquierda de la pantalla
+  const wr = {11:15, 12:16};
+  return sh.map((s,k) => {
+    const w = wr[s];
+    if (lm[w*3+2] < 0.35) return null;
+    const out = (lm[w*3] - lm[s*3]) * (k===0 ? -1 : 1) * tracker.aspect;
+    const up  = -(lm[w*3+1] - lm[s*3+1]);
+    return Math.atan2(up, out) * 180 / Math.PI;
+  });
+}
+const angDiff = (a,b) => { let d = Math.abs(a-b) % 360; return d > 180 ? 360-d : d; };
+
+function drawSkeleton(lm, color, glow){
+  ctx.save(); ctx.lineCap = 'round'; ctx.strokeStyle = color; ctx.lineWidth = R.h*0.016;
+  ctx.shadowColor = color; ctx.shadowBlur = glow ? R.h*0.05 : R.h*0.012;
+  for (const [a,b] of BONES){
+    if (lm[a*3+2] < 0.3 || lm[b*3+2] < 0.3) continue;
+    const p = P(lm,a), q = P(lm,b);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+  }
+  const n = P(lm,0), s1 = P(lm,11), s2 = P(lm,12);
+  if (n.v > 0.3) circle(n.x, n.y, Math.max(R.h*0.03, Math.hypot(s1.x-s2.x, s1.y-s2.y)*0.33), null, color, R.h*0.016);
+  ctx.shadowBlur = 0;
+  for (const h of hands(lm)) circle(h.x, h.y, R.h*0.024, '#fff', color, R.h*0.008);
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------
+//  Sonido y música (sintetizados, sin archivos)
+// ---------------------------------------------------------------------
+let AC = null, master = null, noiseBuf = null, music = null;
+function ensureAudio(){
+  try {
+    if (!AC){
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      master = AC.createGain(); master.gain.value = 0.8; master.connect(AC.destination);
+      noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i=0;i<d.length;i++) d[i] = Math.random()*2-1;
+    }
+    if (AC.state === 'suspended') AC.resume();
+  } catch(e){ AC = null; }
+}
+function tone(f, t, dur, type='sine', vol=0.2, fEnd){
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t); if (fEnd) o.frequency.exponentialRampToValueAtTime(fEnd, t+dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.05);
+}
+function noise(t, dur, vol, hp){
+  const s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+  s.buffer = noiseBuf; f.type = 'highpass'; f.frequency.value = hp;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+dur+0.05);
+}
+function sfx(name){
+  if (!AC) return; const t = AC.currentTime;
+  switch(name){
+    case 'pop':    tone(500,t,0.12,'sine',0.3,1400); break;
+    case 'gold':   tone(880,t,0.1,'square',0.12); tone(1320,t+0.08,0.18,'square',0.12); break;
+    case 'bomb':   noise(t,0.45,0.6,80); tone(120,t,0.4,'sawtooth',0.25,40); break;
+    case 'ok':     tone(660,t,0.1,'triangle',0.25); tone(990,t+0.09,0.15,'triangle',0.25); break;
+    case 'fail':   tone(300,t,0.3,'sawtooth',0.15,120); break;
+    case 'tick':   tone(1000,t,0.06,'sine',0.2); break;
+    case 'go':     tone(523,t,0.12,'square',0.15); tone(784,t+0.12,0.25,'square',0.15); break;
+    case 'select': tone(700,t,0.08,'triangle',0.25); tone(1050,t+0.07,0.12,'triangle',0.25); break;
+    case 'win':    [523,659,784,1047].forEach((f,i)=>tone(f,t+i*0.13,0.3,'triangle',0.25)); break;
+  }
+}
+function musicStart(bpm){
+  if (!AC) return; musicStop();
+  const spb = 60/bpm, start = AC.currentTime + 0.15, roots = [110, 87.31, 130.81, 98];   // La m · Fa · Do · Sol
+  let step = 0;
+  const sched = () => {
+    while (start + step*spb/2 < AC.currentTime + 0.25){
+      const t = start + step*spb/2, root = roots[Math.floor(step/8) % 4];
+      if (step%2 === 0){ tone(150,t,0.14,'sine',0.9,40); tone(root,t,spb*0.85,'triangle',0.22); }
+      if (step%4 === 2) noise(t,0.16,0.35,1200);
+      if (step%2 === 1) noise(t,0.04,0.12,7000);
+      tone(root*[4,6,8,6][step%4], t, 0.14, 'square', 0.035);
+      step++;
+    }
+  };
+  sched(); music = { id:setInterval(sched, 40), start };
+}
+function musicStop(){ if (music){ clearInterval(music.id); music = null; } }
+
+// ---------------------------------------------------------------------
+//  Estado del juego
+// ---------------------------------------------------------------------
+const game = { state:'menu', t:0, n:2, scores:[0,0], queue:[], last:[], cur:null, base:[null,null], states:['none','none'], calibT:0 };
+const fx = { texts:[], parts:[], shake:0 };
+let clickPt = null, camConnected = false, tvCode = '';
+const hover = {};
+
+function getP(i){ return game.n === 1 ? (tracker.get(0) || tracker.get(1)) : tracker.get(i); }
+function zone(i){
+  if (game.n === 1) return { x0:0.04, x1:0.96 };
+  return i === 0 ? { x0:0.03, x1:0.47 } : { x0:0.53, x1:0.97 };
+}
+function floatText(x,y,s,color){ fx.texts.push({ x, y, s, color, t:0 }); }
+function burst(x,y,color,n=14){ for (let i=0;i<n;i++){ const a=rand(0,Math.PI*2), v=rand(0.3,1)*R.h*0.6; fx.parts.push({ x, y, vx:Math.cos(a)*v, vy:Math.sin(a)*v, t:0, color }); } }
+function go(state){ game.state = state; game.t = 0; }
+
+function startSelection(list){
+  game.last = list.slice(); game.queue = list.slice(); game.scores = [0,0]; game.calibT = 0;
+  go('calib');
+}
+function nextGame(){
+  const C = game.queue.shift();
+  game.cur = new C(); go('intro');
+}
+
+// Estado corporal (de pie / salto / agachado) con línea base que se adapta poco a poco
+function updateBodyStates(){
+  for (let i=0;i<game.n;i++){
+    const lm = getP(i), b = game.base[i];
+    if (!lm || !b){ game.states[i] = 'none'; continue; }
+    const m = metrics(lm);
+    let s = 'stand';
+    if (m.hip < b.hip - 0.22*b.torso) s = 'jump';
+    else if (m.sh > b.sh + 0.33*b.torso) s = 'duck';
+    else { b.sh += (m.sh-b.sh)*0.02; b.hip += (m.hip-b.hip)*0.02; b.torso += (m.torso-b.torso)*0.02; b.nose += (m.nose-b.nose)*0.02; b.ank += (m.ank-b.ank)*0.02; }
+    game.states[i] = s;
+  }
+}
+
+// Botones que se activan dejando la mano encima (o tocando la pantalla)
+function buttons(list, dt){
+  let fired = null;
+  const hs = [0,1].flatMap(i => { const lm = tracker.get(i); return lm ? hands(lm) : []; });
+  for (const b of list){
+    const inside = hs.some(h => h.x>b.x && h.x<b.x+b.w && h.y>b.y && h.y<b.y+b.h);
+    hover[b.id] = Math.max(0, (hover[b.id]||0) + (inside ? dt : -dt*2));
+    if (hover[b.id] >= 1.2){ hover[b.id] = 0; fired = b; }
+    if (clickPt && clickPt.x>b.x && clickPt.x<b.x+b.w && clickPt.y>b.y && clickPt.y<b.y+b.h) fired = b;
+  }
+  clickPt = null;
+  if (fired) sfx('select');
+  return fired;
+}
+function drawButtons(list){
+  for (const b of list){
+    const p = clamp((hover[b.id]||0)/1.2, 0, 1);
+    ctx.save(); rrect(b.x,b.y,b.w,b.h,b.h*0.2); ctx.fillStyle = 'rgba(255,255,255,.14)'; ctx.fill();
+    ctx.lineWidth = R.h*0.006; ctx.strokeStyle = b.color || '#fff'; ctx.stroke(); ctx.clip();
+    ctx.fillStyle = (b.color || '#ffe14d') + '88'; ctx.fillRect(b.x, b.y, b.w*p, b.h); ctx.restore();
+    text(b.icon, b.x+b.w/2, b.y+b.h*0.36, b.h*0.34);
+    text(b.label, b.x+b.w/2, b.y+b.h*0.76, Math.min(b.h*0.17, b.w*0.11));
+  }
+}
+
+// =====================================================================
+//  MINIJUEGO 1 · Burbujas
+// =====================================================================
+class Bubbles {
+  constructor(){ this.name='🫧 Burbujas'; this.help='Revienta las burbujas con las manos · ⭐ = +30 · ¡No toques las bombas 💣!';
+    this.dur=40; this.t=0; this.items=[]; this.spawn=[0.3,0.3]; this.score=[0,0]; }
+  get done(){ return this.t >= this.dur; }
+  start(){}
+  update(dt){
+    this.t += dt;
+    for (let i=0;i<game.n;i++){
+      this.spawn[i] -= dt;
+      if (this.spawn[i] <= 0){
+        const z = zone(i), r = Math.random();
+        const type = r < 0.13 ? 'bomb' : (r < 0.25 ? 'gold' : 'normal');
+        this.items.push({ owner:i, type, nx:rand(z.x0+0.04, z.x1-0.04), ny:rand(0.1, 0.7), t:0, life:rand(2.6,3.4),
+          hue:rand(170,320), vy:rand(-0.02,0.02) });
+        this.spawn[i] = Math.max(0.35, 0.7 - this.t*0.008) + Math.random()*0.25;
+      }
+    }
+    for (const it of this.items){
+      it.t += dt; it.ny += it.vy*dt;
+      const lm = getP(it.owner); if (!lm || it.dead || it.t < 0.15) continue;
+      const x = R.x + it.nx*R.w, y = R.y + it.ny*R.h, rr = this.radius(it);
+      if (hands(lm).some(h => Math.hypot(h.x-x, h.y-y) < rr + R.h*0.02)){
+        it.dead = true; const i = it.owner;
+        if (it.type === 'bomb'){ this.score[i] = Math.max(-game.scores[i], this.score[i]-15); floatText(x,y,'-15 💥','#ff6b6b'); burst(x,y,'#ff6b6b',22); fx.shake = 0.35; sfx('bomb'); }
+        else if (it.type === 'gold'){ this.score[i] += 30; floatText(x,y,'+30 ⭐','#ffe14d'); burst(x,y,'#ffe14d',20); sfx('gold'); }
+        else { this.score[i] += 10; floatText(x,y,'+10',PCOL[i]); burst(x,y,`hsl(${it.hue},90%,70%)`); sfx('pop'); }
+      }
+    }
+    this.items = this.items.filter(it => !it.dead && it.t < it.life);
+  }
+  radius(it){
+    const base = R.h * (it.type==='gold' ? 0.05 : it.type==='bomb' ? 0.06 : 0.065);
+    const k = Math.min(1, it.t/0.2) * Math.min(1, (it.life-it.t)/0.3);
+    return base * Math.max(0.05, k);
+  }
+  draw(){
+    for (const it of this.items){
+      const x = R.x + it.nx*R.w, y = R.y + it.ny*R.h, r = this.radius(it);
+      if (it.type === 'bomb'){
+        circle(x,y,r,'#222','#ff4d4d',R.h*0.008); text('💣', x, y, r*1.2);
+      } else if (it.type === 'gold'){
+        circle(x,y,r,'rgba(255,225,77,.35)','#ffe14d',R.h*0.008); text('⭐', x, y, r*1.2);
+      } else {
+        const g = ctx.createRadialGradient(x-r*0.35,y-r*0.35,r*0.1,x,y,r);
+        g.addColorStop(0,'rgba(255,255,255,.85)'); g.addColorStop(0.3,`hsla(${it.hue},90%,70%,.35)`); g.addColorStop(1,`hsla(${it.hue},90%,60%,.55)`);
+        circle(x,y,r,g,`hsla(${it.hue},90%,80%,.9)`,R.h*0.005);
+      }
+    }
+  }
+}
+
+// =====================================================================
+//  MINIJUEGO 2 · Salta y agáchate
+// =====================================================================
+class Dodge {
+  constructor(){ this.name='🦘 Salta y agáchate'; this.help='Tronco por abajo 🪵 → ¡SALTA! · Rayo por arriba ⚡ → ¡AGÁCHATE!';
+    this.dur=42; this.t=0; this.obs=[]; this.next=[1.0,1.0]; this.score=[0,0]; this.hist=[[],[]]; }
+  get done(){ return this.t >= this.dur && this.obs.every(o => o.resolved); }
+  start(){}
+  update(dt){
+    this.t += dt;
+    for (let i=0;i<game.n;i++){
+      this.hist[i].push({ t:this.t, s:game.states[i] });
+      while (this.hist[i].length && this.hist[i][0].t < this.t-2) this.hist[i].shift();
+      if (this.t >= this.next[i] && this.t < this.dur - 2.5){
+        const travel = Math.max(1.35, 2.3 - this.t*0.022);
+        const from = game.n === 2 ? (i===0 ? -1 : 1) : (Math.random()<0.5 ? -1 : 1);
+        this.obs.push({ owner:i, type:Math.random()<0.5 ? 'jump' : 'duck', t0:this.t, travel, from, resolved:false });
+        this.next[i] = this.t + Math.max(1.5, 2.6 - this.t*0.025) + rand(0,0.5);
+      }
+    }
+    for (const o of this.obs){
+      const hit = o.t0 + o.travel;
+      if (!o.resolved && this.t >= hit + 0.3){
+        o.resolved = true; const i = o.owner;
+        o.ok = this.hist[i].some(h => h.t >= hit-0.4 && h.t <= hit+0.3 && h.s === o.type);
+        const px = this.playerX(i);
+        if (o.ok){ this.score[i] += 20; floatText(px, R.y+R.h*0.35, '+20 ¡Bien!', '#6dff9c'); sfx('ok'); }
+        else { floatText(px, R.y+R.h*0.35, '¡Ay!', '#ff6b6b'); fx.shake = 0.25; sfx('fail'); }
+      }
+    }
+    this.obs = this.obs.filter(o => this.t < o.t0 + o.travel*1.8);
+  }
+  playerX(i){ const lm = getP(i), z = zone(i); return lm ? R.x + metrics(lm).cx*R.w : R.x + (z.x0+z.x1)/2*R.w; }
+  draw(){
+    for (const o of this.obs){
+      const i = o.owner, z = zone(i), b = game.base[i];
+      const startX = R.x + (o.from < 0 ? z.x0 : z.x1)*R.w, px = this.playerX(i);
+      const p = (this.t - o.t0) / o.travel, x = startX + (px - startX)*p;
+      const ank = R.y + (b ? b.ank : 0.9)*R.h, head = R.y + (b ? b.nose : 0.2)*R.h;
+      ctx.save(); if (o.resolved) ctx.globalAlpha = 0.45;
+      if (o.type === 'jump'){
+        const w = R.w*0.1, h = R.h*0.06;
+        rrect(x-w/2, ank-h*0.9, w, h, h*0.4); ctx.fillStyle = '#8b5a2b'; ctx.fill(); ctx.strokeStyle = '#d9a066'; ctx.lineWidth = R.h*0.006; ctx.stroke();
+        circle(x+w/2-h*0.3, ank-h*0.4, h*0.32, '#d9a066', '#6b4220', R.h*0.004);
+      } else {
+        const w = R.w*0.13, y = head - R.h*0.01;
+        ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = R.h*0.018; ctx.shadowColor = '#ffe14d'; ctx.shadowBlur = R.h*0.04;
+        ctx.beginPath(); for (let k=0;k<=8;k++){ const xx = x - w/2 + w*k/8, yy = y + (k%2 ? -1 : 1)*R.h*0.015; k ? ctx.lineTo(xx,yy) : ctx.moveTo(xx,yy); } ctx.stroke();
+      }
+      ctx.restore();
+      if (!o.resolved && p > 0.3 && p < 1.1){
+        const zx = R.x + (z.x0+z.x1)/2*R.w, pulse = 1 + 0.08*Math.sin(this.t*18);
+        text(o.type === 'jump' ? '⬆ ¡SALTA!' : '⬇ ¡AGÁCHATE!', zx, R.y+R.h*0.12, R.h*0.075*pulse, o.type === 'jump' ? '#6dff9c' : '#ffe14d');
+      }
+    }
+  }
+}
+
+// =====================================================================
+//  MINIJUEGO 3 · Baile (imita la postura al ritmo)
+// =====================================================================
+const DANCE_POSES = [
+  { n:'¡Brazos arriba!', a:[90,90] },  { n:'¡En cruz!', a:[0,0] },       { n:'¡Haz una Y!', a:[45,45] },
+  { n:'¡Abajo abiertos!', a:[-45,-45] }, { n:'¡Uno arriba!', a:[90,-90] }, { n:'¡El otro arriba!', a:[-90,90] },
+  { n:'¡Diagonal!', a:[45,-45] },      { n:'¡Diagonal al revés!', a:[-45,45] }, { n:'¡Arriba y cruz!', a:[90,0] },
+  { n:'¡Cruz y arriba!', a:[0,90] },
+];
+function poseQuality(lm, target){
+  const a = armAngles(lm); if (a[0] === null || a[1] === null) return 0;
+  const d = Math.max(angDiff(a[0],target[0]), angDiff(a[1],target[1]));
+  return clamp(1 - (d-15)/40, 0, 1);
+}
+function drawPoseIcon(cx, cy, s, ang, color){
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = s*0.07; ctx.lineCap = 'round';
+  const shY = cy - s*0.15, hipY = cy + s*0.15, half = s*0.11, arm = s*0.3;
+  circle(cx, cy-s*0.3, s*0.1, null, color, s*0.07);
+  ctx.beginPath(); ctx.moveTo(cx,shY); ctx.lineTo(cx,hipY); ctx.moveTo(cx-half,shY); ctx.lineTo(cx+half,shY);
+  ctx.moveTo(cx,hipY); ctx.lineTo(cx-s*0.12, cy+s*0.42); ctx.moveTo(cx,hipY); ctx.lineTo(cx+s*0.12, cy+s*0.42);
+  const r0 = ang[0]*Math.PI/180, r1 = ang[1]*Math.PI/180;
+  ctx.moveTo(cx-half,shY); ctx.lineTo(cx-half-Math.cos(r0)*arm, shY-Math.sin(r0)*arm);
+  ctx.moveTo(cx+half,shY); ctx.lineTo(cx+half+Math.cos(r1)*arm, shY-Math.sin(r1)*arm);
+  ctx.stroke(); ctx.restore();
+}
+class Dance {
+  constructor(){ this.name='💃 Baile'; this.help='Copia la postura del muñeco y mantenla cuando el círculo se ponga amarillo';
+    this.cards=16; this.cardLen=2.4; this.t=0; this.clock=-0.2; this.score=[0,0]; this.q=[0,0]; this.acc=[[0,0],[0,0]]; this.evaluated=-1; this.seq=[];
+    let last=-1; for (let k=0;k<this.cards;k++){ let r; do { r = Math.floor(Math.random()*DANCE_POSES.length); } while (r===last); this.seq.push(r); last = r; } }
+  get done(){ return this.clock >= this.cards*this.cardLen + 0.4; }
+  start(){ musicStart(100); }   // 100 ppm → 0,6 s por pulso → 4 pulsos por postura
+  update(dt){
+    this.t += dt;
+    this.clock = music ? AC.currentTime - music.start : this.t - 0.2;
+    const c = this.clock; if (c < 0) return;
+    const k = Math.floor(c/this.cardLen), within = c - k*this.cardLen;
+    if (k >= 1 && k-1 > this.evaluated) this.evaluate(Math.min(k-1, this.cards-1));
+    if (k >= this.cards){ musicStop(); return; }
+    const target = DANCE_POSES[this.seq[k]].a;
+    for (let i=0;i<game.n;i++){
+      const lm = getP(i), q = lm ? poseQuality(lm, target) : 0; this.q[i] = q;
+      if (within >= this.cardLen*0.5){ this.acc[i][0] += q; this.acc[i][1]++; }
+    }
+  }
+  evaluate(k){
+    this.evaluated = k; let any = false;
+    for (let i=0;i<game.n;i++){
+      const avg = this.acc[i][0] / Math.max(1, this.acc[i][1]), pts = Math.round(avg*30);
+      this.score[i] += pts; this.acc[i] = [0,0];
+      const z = zone(i), x = R.x + (z.x0+z.x1)/2*R.w, y = R.y + R.h*0.42;
+      if (avg > 0.65){ floatText(x,y,`¡Perfecto! +${pts}`,'#6dff9c'); burst(x,y,PCOL[i],18); any = true; }
+      else if (avg > 0.3) floatText(x,y,`¡Bien! +${pts}`,'#ffe14d');
+      else floatText(x,y,'¡Uy!','#ff6b6b');
+    }
+    if (any) sfx('ok');
+  }
+  draw(){
+    const c = this.clock; if (c < 0) return;
+    const k = Math.min(this.cards-1, Math.floor(c/this.cardLen)), within = c - k*this.cardLen;
+    const beat = (c % 0.6) / 0.6;
+    ctx.fillStyle = `rgba(255,255,255,${(1-beat)*0.05})`; ctx.fillRect(0,0,cv.width,cv.height);
+    if (c >= this.cards*this.cardLen) return;
+    const cur = DANCE_POSES[this.seq[k]], nxt = k+1 < this.cards ? DANCE_POSES[this.seq[k+1]] : null;
+    const inWin = within >= this.cardLen*0.5;
+    for (let i=0;i<game.n;i++){
+      const z = zone(i), cx = R.x + (z.x0+z.x1)/2*R.w, cy = R.y + R.h*0.2, s = R.h*0.22*(1+(1-beat)*0.04);
+      circle(cx, cy, s*0.62, 'rgba(0,0,0,.35)');
+      ctx.save(); ctx.strokeStyle = inWin ? '#ffe14d' : 'rgba(255,255,255,.5)'; ctx.lineWidth = R.h*0.012; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(cx, cy, s*0.62, -Math.PI/2, -Math.PI/2 + Math.PI*2*(within/this.cardLen)); ctx.stroke(); ctx.restore();
+      drawPoseIcon(cx, cy, s, cur.a, this.q[i] > 0.6 ? '#6dff9c' : '#fff');
+      text(cur.n, cx, cy + s*0.8, R.h*0.045);
+      if (nxt){ const nx = cx + s*0.95; text('Siguiente', nx, cy - s*0.45, R.h*0.022, '#ccc', 'center', 600); drawPoseIcon(nx, cy - s*0.15, s*0.4, nxt.a, 'rgba(255,255,255,.6)'); }
+      // Brazos "guía" encima del jugador
+      const lm = getP(i);
+      if (lm){
+        const sh = [11,12].sort((a,b) => lm[a*3]-lm[b*3]);
+        const len = Math.hypot((lm[69]-lm[33])*R.w, (lm[70]-lm[34])*R.h) * 0.9;
+        ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = R.h*0.03; ctx.lineCap = 'round';
+        sh.forEach((si,kk) => { const p = P(lm,si), r = cur.a[kk]*Math.PI/180;
+          ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x + (kk===0?-1:1)*Math.cos(r)*len, p.y - Math.sin(r)*len); ctx.stroke(); });
+        ctx.restore();
+      }
+    }
+  }
+}
+
+const GAMES = { party:[Bubbles, Dodge, Dance], bubbles:[Bubbles], dodge:[Dodge], dance:[Dance] };
+
+// ---------------------------------------------------------------------
+//  Actualización y dibujo por estados
+// ---------------------------------------------------------------------
+let menuBtns = [], finalBtns = [];
+function layoutButtons(){
+  const bw = R.w*0.215, bh = R.h*0.2, gap = (R.w - bw*4)/5, y = R.y + R.h*0.06;
+  const defs = [['party','🎉','Fiesta (los 3)','#ffe14d'],['bubbles','🫧','Burbujas',PCOL[0]],['dodge','🦘','Salta y agáchate','#6dff9c'],['dance','💃','Baile',PCOL[1]]];
+  menuBtns = defs.map((d,i) => ({ id:'m_'+d[0], key:d[0], icon:d[1], label:d[2], color:d[3], x:R.x+gap+(bw+gap)*i, y, w:bw, h:bh }));
+  const fw = R.w*0.26, fh = R.h*0.18;
+  finalBtns = [
+    { id:'f_again', key:'again', icon:'🔁', label:'Otra vez', color:'#6dff9c', x:R.x+R.w*0.2-fw/2, y:R.y+R.h*0.06, w:fw, h:fh },
+    { id:'f_menu',  key:'menu',  icon:'🏠', label:'Menú', color:'#ffe14d', x:R.x+R.w*0.8-fw/2, y:R.y+R.h*0.06, w:fw, h:fh },
+  ];
+}
+
+function update(dt){
+  game.t += dt;
+  layoutButtons();
+  switch (game.state){
+    case 'menu': {
+      const b = buttons(menuBtns, dt);
+      if (b) startSelection(GAMES[b.key]);
+      break;
+    }
+    case 'calib': {
+      const vis = [0,1].filter(i => fullBody(tracker.get(i)));
+      if (vis.length){ game.calibT += dt; if (Math.floor(game.calibT) !== Math.floor(game.calibT-dt)) sfx('tick'); }
+      else game.calibT = 0;
+      if (game.calibT >= 3){
+        game.n = vis.length >= 2 ? 2 : 1;
+        game.base = [null,null];
+        for (let i=0;i<game.n;i++){ const lm = getP(i); if (lm) game.base[i] = metrics(lm); }
+        sfx('go'); nextGame();
+      }
+      break;
+    }
+    case 'intro':
+      if (Math.floor(game.t) !== Math.floor(game.t-dt) && game.t < 4) sfx('tick');
+      if (game.t >= 4.5){ go('play'); game.cur.start(); sfx('go'); }
+      updateBodyStates();
+      break;
+    case 'play':
+      updateBodyStates();
+      game.cur.update(dt);
+      if (game.cur.done){ musicStop(); for (let i=0;i<2;i++) game.scores[i] += game.cur.score[i]; go('roundEnd'); }
+      break;
+    case 'roundEnd':
+      if (game.t >= 3.5){ if (game.queue.length) nextGame(); else { go('final'); sfx('win'); } }
+      break;
+    case 'final': {
+      const b = buttons(finalBtns, dt);
+      if (b && b.key === 'again') startSelection(game.last);
+      if (b && b.key === 'menu') go('menu');
+      break;
+    }
+  }
+  for (const t of fx.texts) t.t += dt;
+  fx.texts = fx.texts.filter(t => t.t < 1.2);
+  for (const p of fx.parts){ p.t += dt; p.x += p.vx*dt; p.y += p.vy*dt; p.vy += R.h*1.2*dt; }
+  fx.parts = fx.parts.filter(p => p.t < 0.8);
+  fx.shake = Math.max(0, fx.shake - dt);
+}
+
+function drawBackground(){
+  const g = ctx.createLinearGradient(0,0,0,cv.height); g.addColorStop(0,'#1a1440'); g.addColorStop(1,'#0b2a3a');
+  ctx.fillStyle = g; ctx.fillRect(0,0,cv.width,cv.height);
+  if (MODE === 'local' && video.readyState >= 2){
+    ctx.save(); ctx.globalAlpha = 0.22; ctx.translate(R.x+R.w, R.y); ctx.scale(-1,1); ctx.drawImage(video, 0, 0, R.w, R.h); ctx.restore();
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.lineWidth = 1;
+  for (let k=1;k<10;k++){ const y = R.y + R.h*k/10; ctx.beginPath(); ctx.moveTo(R.x,y); ctx.lineTo(R.x+R.w,y); ctx.stroke(); }
+  if (game.n === 2 && ['intro','play'].includes(game.state)){
+    ctx.save(); ctx.setLineDash([R.h*0.02, R.h*0.02]); ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = R.h*0.004;
+    ctx.beginPath(); ctx.moveTo(R.x+R.w/2, R.y); ctx.lineTo(R.x+R.w/2, R.y+R.h); ctx.stroke(); ctx.restore();
+  }
+}
+function drawPlayers(){
+  const inGame = ['intro','play','roundEnd'].includes(game.state);
+  for (let i=0;i<2;i++){
+    if (inGame && i >= game.n) continue;
+    const lm = inGame ? getP(i) : tracker.get(i);
+    const glow = game.state === 'play' && game.cur instanceof Dance && game.cur.q[i] > 0.6;
+    if (lm) drawSkeleton(lm, inGame && game.n === 1 ? PCOL[0] : PCOL[i], glow);
+    else if (inGame){ const z = zone(i); text(`${PNAME[i]}: ¡no te veo! 👀`, R.x+(z.x0+z.x1)/2*R.w, R.y+R.h*0.55, R.h*0.045, '#ff9b9b'); }
+  }
+}
+function drawHUD(){
+  const sc = i => game.scores[i] + (game.state === 'play' ? game.cur.score[i] : 0);
+  text(`${PNAME[0]}: ${sc(0)}`, R.x+R.w*0.02, R.y+R.h*0.95, R.h*0.05, PCOL[0], 'left');
+  if (game.n === 2) text(`${PNAME[1]}: ${sc(1)}`, R.x+R.w*0.98, R.y+R.h*0.95, R.h*0.05, PCOL[1], 'right');
+  if (game.state === 'play' && !(game.cur instanceof Dance)){
+    const left = Math.max(0, Math.ceil(game.cur.dur - game.cur.t));
+    text(`⏱ ${left}`, R.x+R.w/2, R.y+R.h*0.95, R.h*0.055, left <= 5 ? '#ff6b6b' : '#fff');
+  }
+}
+
+function draw(){
+  ctx.save();
+  if (fx.shake > 0) ctx.translate(rand(-1,1)*R.h*0.02*fx.shake/0.35, rand(-1,1)*R.h*0.02*fx.shake/0.35);
+  drawBackground();
+  const cx = R.x + R.w/2, u = R.h/100;
+
+  if (game.state === 'menu'){
+    drawPlayers(); drawButtons(menuBtns);
+    text('¡Muévete!', cx, R.y+R.h*0.45, u*12, '#ffe14d');
+    text('Levanta la mano y déjala sobre un botón para elegir', cx, R.y+R.h*0.57, u*4.2);
+    const nVis = [0,1].filter(i => tracker.get(i)).length;
+    text(nVis ? `Te veo: ${nVis} jugador${nVis>1?'es':''} ✔` : 'Ponte delante de la cámara…', cx, R.y+R.h*0.66, u*3.6, nVis ? '#6dff9c' : '#ff9b9b', 'center', 600);
+  }
+  else if (game.state === 'calib'){
+    drawPlayers();
+    text('¡Que se os vea de cuerpo entero!', cx, R.y+R.h*0.12, u*6.5);
+    text('Jugador 1 a la izquierda · Jugador 2 a la derecha', cx, R.y+R.h*0.22, u*4, '#ccc', 'center', 600);
+    if (game.calibT > 0) text(String(3 - Math.floor(game.calibT)), cx, R.y+R.h*0.5, u*22, '#ffe14d');
+    else text('Alejaos un poco hasta que se vean los pies', cx, R.y+R.h*0.5, u*4.5, '#ff9b9b');
+  }
+  else if (game.state === 'intro'){
+    drawPlayers();
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0,0,cv.width,cv.height);
+    text(game.cur.name, cx, R.y+R.h*0.25, u*10, '#ffe14d');
+    text(game.cur.help, cx, R.y+R.h*0.4, Math.min(u*4.2, R.w/game.cur.help.length*1.7));
+    if (game.t > 1.5) text(String(Math.max(1, 4 - Math.floor(game.t-0.5))), cx, R.y+R.h*0.65, u*20);
+    drawHUD();
+  }
+  else if (game.state === 'play'){
+    game.cur.draw(); drawPlayers(); drawHUD();
+  }
+  else if (game.state === 'roundEnd'){
+    drawPlayers();
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0,0,cv.width,cv.height);
+    text('¡Fin de la ronda!', cx, R.y+R.h*0.22, u*9, '#ffe14d');
+    for (let i=0;i<game.n;i++) text(`${PNAME[i]}: +${game.cur.score[i]}   (total ${game.scores[i]})`, cx, R.y+R.h*(0.42+i*0.12), u*6, PCOL[i]);
+  }
+  else if (game.state === 'final'){
+    drawPlayers(); drawButtons(finalBtns);
+    let msg = '¡Buen trabajo!';
+    if (game.n === 2) msg = game.scores[0] === game.scores[1] ? '¡Empate! 🤝' : `🏆 ¡Gana el ${PNAME[game.scores[0] > game.scores[1] ? 0 : 1]}!`;
+    text(msg, cx, R.y+R.h*0.42, u*10, '#ffe14d');
+    for (let i=0;i<game.n;i++) text(`${PNAME[i]}: ${game.scores[i]} puntos`, cx, R.y+R.h*(0.58+i*0.1), u*6, PCOL[i]);
+  }
+
+  for (const p of fx.parts) circle(p.x, p.y, R.h*0.012*(1-p.t/0.8), p.color);
+  for (const t of fx.texts){ ctx.globalAlpha = 1 - t.t/1.2; text(t.s, t.x, t.y - t.t*R.h*0.12, R.h*0.06, t.color); ctx.globalAlpha = 1; }
+  ctx.restore();
+}
+
+cv.addEventListener('pointerdown', e => { const d = cv.width / cv.clientWidth; clickPt = { x:e.clientX*d, y:e.clientY*d }; ensureAudio(); });
+
+let lastT = performance.now();
+function frame(now){
+  const dt = Math.min(0.05, (now - lastT)/1000); lastT = now;
+  if (MODE === 'local'){ const d = detect(); if (d) tracker.update(d.poses, d.aspect); }
+  if (MODE === 'local' || MODE === 'tv'){
+    R = viewRect(); update(dt); draw();
+    if (MODE === 'tv') $('#tvWait').classList.toggle('hidden', camConnected);
+  }
+  if (MODE === 'cam') camFrame(now);
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------------
+//  Modos de arranque
+// ---------------------------------------------------------------------
+function showGameCanvas(){ show(null); cv.classList.remove('hidden'); $('#exitBtn').classList.remove('hidden'); resize(); }
+
+async function startLocal(){
+  MODE = 'local'; ensureAudio(); await goFullscreen(); keepAwake();
+  try { await initPose(); await startCamera(); }
+  catch(e){ loading('No se pudo abrir la cámara o cargar el detector. Revisa los permisos y que la página se abra con https.\n' + (e.message||e)); return; }
+  showGameCanvas(); requestAnimationFrame(frame);
+}
+
+let peer = null, conn = null;
+function startTV(){
+  MODE = 'tv'; show('tvStart'); $('#tvGo').focus();
+  $('#tvGo').onclick = () => { ensureAudio(); goFullscreen(); keepAwake(); showGameCanvas(); requestAnimationFrame(frame); };
+  if (typeof Peer === 'undefined'){ $('#tvNet').textContent = '⚠ No se pudo cargar la conexión (PeerJS). Comprueba Internet.'; return; }
+  const open = () => {
+    tvCode = String(Math.floor(1000 + Math.random()*9000));
+    peer = new Peer(PEER_PREFIX + tvCode);
+    peer.on('open', () => {
+      $('#tvCode').textContent = tvCode; $('#tvNet').textContent = 'Listo para conectar ✔';
+      try {
+        const url = location.origin + location.pathname + '?cam=' + tvCode;
+        const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); $('#qr').innerHTML = qr.createSvgTag({ cellSize:6, margin:2 });
+      } catch(e){}
+    });
+    peer.on('error', e => {
+      if (e.type === 'unavailable-id'){ peer.destroy(); open(); }
+      else $('#tvNet').textContent = '⚠ Error de conexión: ' + e.type;
+    });
+    peer.on('disconnected', () => { try { peer.reconnect(); } catch(e){} });
+    peer.on('connection', c => {
+      if (conn) try { conn.close(); } catch(e){}
+      conn = c;
+      c.on('data', d => { if (d && d.p){ tracker.update(d.p, d.a); camConnected = true; } });
+      c.on('close', () => { if (conn === c){ camConnected = false; conn = null; } });
+    });
+  };
+  open();
+}
+
+// --- Móvil como cámara ---
+const camCv = $('#camCanvas'), camCtx = camCv.getContext('2d');
+let lastSend = 0, lastPoses = [];
+function camStatus(msg, cls){ const el = $('#camStatus'); el.textContent = msg; el.className = 'status ' + (cls||''); }
+async function startCam(code){
+  MODE = 'cam'; facing = $('#facingSel').value; keepAwake();
+  try { await initPose(); await startCamera(); }
+  catch(e){ loading(''); show('camSetup'); alert('No se pudo abrir la cámara: ' + (e.message||e)); return; }
+  show('camRun'); try { await screen.orientation.lock('landscape'); } catch(e){}
+  $('#flipBtn').onclick = async () => { facing = facing === 'user' ? 'environment' : 'user'; try { await startCamera(); } catch(e){} };
+  if (typeof Peer === 'undefined'){ camStatus('⚠ No se pudo cargar la conexión (PeerJS)', 'bad'); }
+  else {
+    peer = new Peer();
+    const connect = () => {
+      camStatus('Conectando con la TV ' + code + '…');
+      conn = peer.connect(PEER_PREFIX + code, { serialization:'json' });
+      conn.on('open', () => camStatus('✔ Conectado a la TV ' + code, 'ok'));
+      conn.on('close', () => { camStatus('Conexión perdida. Reintentando…', 'bad'); setTimeout(connect, 2000); });
+    };
+    peer.on('open', connect);
+    peer.on('error', e => {
+      if (e.type === 'peer-unavailable'){ camStatus('No encuentro la TV con el código ' + code + '. Reintentando…', 'bad'); setTimeout(connect, 3000); }
+      else camStatus('⚠ Error: ' + e.type, 'bad');
+    });
+  }
+  requestAnimationFrame(frame);
+}
+function camFrame(now){
+  const d = detect();
+  if (d){
+    lastPoses = d.poses; tracker.aspect = d.aspect;
+    if (conn && conn.open && now - lastSend > 38){ lastSend = now; try { conn.send({ p:d.poses, a:+d.aspect.toFixed(3) }); } catch(e){} }
+  }
+  // Vista previa
+  const W = camCv.width, H = Math.round(W / tracker.aspect); if (camCv.height !== H) camCv.height = H;
+  camCtx.save(); camCtx.translate(W,0); camCtx.scale(-1,1); if (video.readyState >= 2) camCtx.drawImage(video,0,0,W,H); camCtx.restore();
+  camCtx.lineWidth = 4; camCtx.lineCap = 'round';
+  lastPoses.forEach((lm,idx) => {
+    camCtx.strokeStyle = PCOL[idx] || '#fff';
+    for (const [a,b] of BONES){ if (lm[a*3+2] < 0.3 || lm[b*3+2] < 0.3) continue;
+      camCtx.beginPath(); camCtx.moveTo(lm[a*3]*W, lm[a*3+1]*H); camCtx.lineTo(lm[b*3]*W, lm[b*3+1]*H); camCtx.stroke(); }
+  });
+  camCtx.fillStyle = '#fff'; camCtx.font = 'bold 20px system-ui'; camCtx.fillText(`Personas: ${lastPoses.length}`, 12, 28);
+}
+
+// ---------------------------------------------------------------------
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+  const m = b.dataset.mode;
+  if (m === 'local') startLocal();
+  if (m === 'tv') startTV();
+  if (m === 'cam') { show('camSetup'); $('#codeInput').focus(); }
+}));
+$('#connectBtn').addEventListener('click', () => {
+  const code = $('#codeInput').value.replace(/\D/g,'');
+  if (code.length !== 4){ alert('Escribe el código de 4 cifras que aparece en la TV'); return; }
+  startCam(code);
+});
+const qp = new URLSearchParams(location.search);
+if (qp.get('cam')){ show('camSetup'); $('#codeInput').value = qp.get('cam').replace(/\D/g,'').slice(0,4); }
+if (qp.get('modo') === 'tv') startTV();
+
+// Exponer para pruebas
+window.__muevete = { game, tracker, update, draw, viewRect, setR:r => { R = r; }, GAMES, setMode:m => { MODE = m; } };
+</script>
+</body>
+</html>
